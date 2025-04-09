@@ -16,6 +16,8 @@ import {InboxEventDatasourceImpl, OutboxEventDatasourceImpl} from "@/infrastruct
 export class RabbitMQ {
     private static _connection: Connection
     private static _channel: Channel
+    private static _isConsuming = false
+    private static _consumerTag: string | null = null;
     private static _config: RabbitMQResilienceConfig
     private static _eventList: Map<string, (rabbitMQMessageDto: RabbitMQMessageDto) => Promise<void>>;
 
@@ -35,8 +37,26 @@ export class RabbitMQ {
         try {
             this._connection = await connect(this._config.rabbitMQConfigConnect)
             this._channel = await this._connection.createConfirmChannel()
+            this._connection.on('error', (err) => {
+                console.error("RabbitMQResilience: Connection error:", err);
+            });
+    
+            this._connection.on('close', () => {
+                console.warn("RabbitMQResilience: Connection closed. Attempting to reconnect...");
+                this.reconnect();
+            });
+    
+            this._channel.on('error', (err) => {
+                console.error("RabbitMQResilience: Channel error:", err);
+            });
+    
+            this._channel.on('close', () => {
+                console.warn("RabbitMQResilience: Channel closed. Attempting to reconnect...");
+                this.reconnect();
+            });
         } catch (e) {
             console.log("RabbitMQResilience: ",e)
+            this.reconnect();
         }
     }
 
@@ -137,7 +157,11 @@ export class RabbitMQ {
             console.log("RabbitMQResilience: Channel not found");
             return;
         }
-        await this._channel.consume(
+        if (this._isConsuming) {
+            console.log("RabbitMQResilience: Already consuming. Skipping...");
+            return;
+        }
+        const { consumerTag } = await this._channel.consume(
             this._config.queue,
             (msg) => {
                 (async () => {
@@ -165,8 +189,30 @@ export class RabbitMQ {
                 })();
             }
         )
-
+        this._consumerTag = consumerTag;
+        this._isConsuming = true;
+        console.log(`RabbitMQResilience: Started consuming with tag ${consumerTag}`);
     }
+
+        private static async reconnect(delay = 5000) {    
+            setTimeout(async () => {
+                try {
+                    await this.connection();
+        
+                    if (this._channel && this._connection) {
+                        console.log("RabbitMQResilience: Connection established. Trying to consume...");
+                        await this.consume();
+                        console.log("RabbitMQResilience: Reconnected successfully.");
+                    } else {
+                        throw new Error("Connection or channel not available after reconnection.");
+                    }
+        
+                } catch (err) {
+                    console.error("RabbitMQResilience: Reconnection failed:", err);
+                    this.reconnect(delay * 2);
+                }
+            }, delay);
+        }    
 
     /**
      * Handles the processing of a message by invoking the appropriate event processors.

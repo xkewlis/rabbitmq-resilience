@@ -78,6 +78,11 @@ export interface RabbitMQResilienceConfig {
     messageTTL: number;
 
     /**
+     * The heartbeat interval in seconds.
+     */
+    heartbeat: number;
+
+    /**
      * Configuration for the event resilience handler.
      */
     eventResilienceHandlerConfig: EventResilienceHandlerConfig;
