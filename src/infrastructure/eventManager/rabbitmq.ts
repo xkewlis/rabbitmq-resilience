@@ -153,6 +153,7 @@ export class RabbitMQ {
      * Consumes messages from the main queue and processes them.
      */
     public static async consume() {
+        //todo: check if channel is closed and reconnect
         if (!this._channel) {
             console.log("RabbitMQResilience: Channel not found");
             return;
